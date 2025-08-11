@@ -1,0 +1,94 @@
+
+pool: 'BapiStgAgents'
+
+variables:
+  # Azure Resource Manager connection created during pipeline creation is used to authenticate PME
+  applicationClientID: 146ebf8a-06cc-457f-b2e0-c58defc15b46
+
+  # Function app name
+  functionAppName: '-FA'
+
+  # Managed identity used to download secret from keyvault in NON-PME
+  keyVaultManagedIdentityClientID: 45b0028c-9fa9-4995-8fb9-4ee258adadd1
+
+  # Tenant Id of PME
+  applicationTenantID: 975f013f-7f24-47e8-a7d3-abc4752bf346
+
+  # keyvault Name located in NON-PME Env
+  azureKeyVaultName: icsstgkeyvault
+  
+  #keyvault certificate secret name
+  certificateSecretName: AzDo-Piplines
+
+  # Zip file name
+  zipFileName: '$(Build.BuildId)-$(Build.SourceVersion).zip'
+
+  # Function App Subscription ID
+  subscriptionID: e4e54aa0-c79d-4b92-9abd-73c602531e14
+
+  # storage account where zip file should be uploaded
+  storageAccountName: "fabriccommunitynps"
+
+  # storage account container name
+  containerName: "pipelineartificats"
+
+  # function app resource group
+  resourceGroupName: "FabricCommunityNps"
+
+stages:
+- stage: Build
+  displayName: Build stage
+
+  jobs:
+  - job: Build
+    displayName: 'Build Node js'
+    steps:
+      - script: |
+          set -ex
+          sudo apt-get update
+          sleep 10
+          if command -v nvm &>/dev/null; then
+                echo "nvm is installed."
+          else
+                echo "nvm is not installed, installing now"
+                curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+                sleep 10
+                export NVM_DIR="$([ -z "${XDG_CONFIG_HOME-}" ] && printf %s "${HOME}/.nvm" || printf %s "${XDG_CONFIG_HOME}/nvm")"
+                [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+                nvm install 20
+                node -v
+          
+          fi
+
+          npm install
+          npm run build
+          zip -rq $(zipFileName) . --exclude @.funcignore --exclude .funcignore --exclude AzDo-Piplines.pfx
+
+      - publish: $(System.DefaultWorkingDirectory)/$(zipFileName)
+        artifact: drop
+
+- stage: Deploy
+  displayName: Deploy stage   
+  dependsOn: Build
+  condition: succeeded()
+
+  jobs:
+  - deployment: Deploy
+    displayName: Deploy
+    environment: 'development'
+    strategy:
+      runOnce:
+        deploy:
+
+          steps:
+          - script: |
+                  set -ex
+                  az login --identity --username $(keyVaultManagedIdentityClientID)
+                  az keyvault secret download --file AzDo-Piplines.pfx --vault-name $(azureKeyVaultName) --name $(certificateSecretName)  --encoding base64 || rm -rf AzDo-Piplines.pfx
+                  ls -l
+                  echo "deploying nodejs code to fucnction from powershell script"
+                  ls -l
+                  pwsh -File $(System.DefaultWorkingDirectory)/pipelines/DeployFunctionApp/deployfunctionapp.ps1 -functionappName "$(functionAppName)" -applicationClientID "$(applicationClientID)" -applicationTenantID "$(applicationTenantID)" \
+                        -workDirectory $(System.DefaultWorkingDirectory) -zipFileName $(zipFileName)  -resourceGroupName $(resourceGroupName)\
+                        -subscriptionID $(subscriptionID) -storageAccountName $(storageAccountName) -containerName $(containerName)
+                  rm -rf AzDo-Piplines.pfx
