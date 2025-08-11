@@ -1,0 +1,61 @@
+stages:  
+  - CHECK-USER  
+  - build
+  - Image-Build-&-Push
+  - deploy
+  - Teams-Build-Stage
+  - Teams-Deploy-Stage
+  - Teams-validateManifest-Stage
+  - Teams-zipAppPackage-Stage
+  - Teams-validateAppPackage-Stage
+  - Teams-update-Stage
+  - Teams-Publish-Stage
+
+before_script: npm install -g @microsoft/teamsapp-cli@3.0.2  # using for publsh teams stages
+variables:
+    environment:
+      value: "dev"
+      options:
+       - "dev"
+       - "italentprod"
+      description: "Choose an environment for deployment"
+    SELECT_TO_DEPLOY:
+      value: "itdAgentBackend"
+      options:
+       - "itdAgentBackend"
+       - "itdAgentTeams"
+       - "TEAMS_PUBLISH"
+      description: "Choose for deployment"
+    service_name: "itdbackend"
+    webAppName: "botfa5"
+    webAppResourceGroupName: "-AI-Bot"
+    webAppSubscriptionID: "5ff-f1fc311c0fa2"
+
+include:
+  - component: $CI_SERVER_FQDN/italentdev/itd-miscellinous-config/Itd-Configurations/ITD-CHECK-USER@0.0.3
+  - component: $CI_SERVER_FQDN/italentdev/itd-miscellinous-config/Itd-Configurations/CODE-BUILD@0.0.3
+    rules:
+      - if: $SELECT_TO_DEPLOY == "itdAgentBackend"
+    inputs:
+      environment: $environment
+  - component: $CI_SERVER_FQDN/italentdev/itd-miscellinous-config/Itd-Configurations/IMAGE-BUILD-AND-DEPLOY@0.0.3
+    rules:
+      - if: $SELECT_TO_DEPLOY == "itdAgentBackend"
+    inputs:
+      environment: $environment
+      service_name: $service_name
+      registry_name: $dev_registryname
+  - component: $CI_SERVER_FQDN/italentdev/itd-miscellinous-config/Itd-Configurations/WEBAPP-CODE-BUILD@0.0.3
+    rules:
+      - if: $SELECT_TO_DEPLOY == "itdAgentTeams"
+  - component: $CI_SERVER_FQDN/italentdev/itd-miscellinous-config/Itd-Configurations/WEBAPP-DEPLOY@0.0.3
+    rules:
+      - if: $SELECT_TO_DEPLOY == "itdAgentTeams"
+    inputs:
+      environment: $environment
+      webAppName: $webAppName
+      webAppResourceGroupName: $webAppResourceGroupName
+      webAppSubscriptionID: $webAppSubscriptionID
+  - component: $CI_SERVER_FQDN/italentdev/itd-miscellinous-config/Itd-Configurations/TEAMS-PUBLISH@0.0.4
+    rules:
+      - if: $SELECT_TO_DEPLOY == "TEAMS_PUBLISH"   
