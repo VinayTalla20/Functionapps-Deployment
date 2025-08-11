@@ -1,0 +1,109 @@
+# .NET Core Function App to Windows on Azure
+# Build a .NET Core function app and deploy it to Azure as a Windows function App.
+# Add steps that analyze code, save build artifacts, deploy, and more:
+# https://docs.microsoft.com/en-us/azure/devops/pipelines/languages/dotnet-core
+
+trigger:
+- pipelines
+
+variables:
+  # Azure Resource Manager connection created during pipeline creation is used to authenticate PME
+  applicationClientID: 146ebf8a-06cc-457f-b2e0-c58defc15b46
+
+  # zip file location
+  azureUserHomePath: '/home/azureuser'
+
+  # Function app name
+  functionAppName: 'Labels-Dev'
+
+  # provide the resource of Function App
+  functionResourceGroup: 'REPORTS-FA-PME-STG'
+
+  # Managed identity used to download secret from keyvault in NON-PME
+  keyVaultManagedIdentityClientID: 45b0028c-9fa9-4995-8fb9-4ee258adadd1
+
+  # Tenant Id of PME
+  applicationTenantID: 975f013f-7f24-47e8-a7d3-abc4752bf346
+
+  # keyvault Name located in NON-PME Env
+  azureKeyVaultName: stgkeyvault
+  
+  #keyvault certificate secret name
+  certificateSecretName: AzDo-Piplines
+  
+  # Agent Pool Name
+  agentPoolName: 'BapiStgAgents'
+
+  # Working Directory
+  workingDirectory: '$(System.DefaultWorkingDirectory)/MicrosoftFunctionAppsMiddleWare/PowerBI.FunctionApp.Labels'
+
+  # Subscription ID for the BAPI
+  subscriptionID: 'e4e54aa0-c79d-4b92-9abd-73c602531e14'
+
+stages:
+- stage: Build
+  displayName: Build stage
+
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      name: $(agentPoolName)
+    steps:
+    - script: |
+          echo "checking login user"
+          whoami
+          dotnet --list-runtimes
+          dotnet --list-sdks
+      displayName: 'check dotnet install version'
+    - script: |
+          dotnet build $(workingDirectory)/*.csproj --output $(System.DefaultWorkingDirectory)/publish_output --configuration Release
+      displayName: 'build dotnet project'
+    - task: ArchiveFiles@2
+      displayName: 'Archive files'
+      inputs:
+        rootFolderOrFile: '$(System.DefaultWorkingDirectory)/publish_output'
+        includeRootFolder: false
+        archiveType: zip
+        archiveFile: $(azureUserHomePath)/$(Build.BuildId).zip
+        replaceExistingArchive: true
+
+    - publish: $(azureUserHomePath)/$(Build.BuildId).zip
+      artifact: drop
+
+- stage: Deploy
+  displayName: Deploy stage
+  dependsOn: Build
+  condition: succeeded()
+
+  jobs:
+  - deployment: Deploy
+    displayName: Deploy
+    environment: 'development'
+    pool:
+      name: $(agentPoolName)
+    strategy:
+      runOnce:
+        deploy:
+
+          steps:
+          - task: DownloadSecureFile@1
+            displayName: 'Download KeyVaultCertificate file'
+            name: KeyVaultCertificate
+            inputs:
+              secureFile: 'AzDo-Piplines.pfx'
+          - script: |
+                if command -v az &>/dev/null; then
+                    echo "Azure CLI is installed."
+                else
+                    echo "Azure CLI is not installed, installing now"
+                    curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+                fi
+                env
+                echo "Certificate Downloaded at ${KEYVAULTCERTIFICATE_SECUREFILEPATH}"
+                ls -l $(KeyVaultCertificate.secureFilePath)
+                # Call Downloaded Certificate using BASH Variable  $KEYVAULTCERTIFICATE_SECUREFILEPATH
+                # Certificate is passed as argument directly in Powershell Script (deployfunctionapp.ps1)
+                pwsh -File $(System.DefaultWorkingDirectory)/Pipelines/DeployFunctionApp/deployfunctionapp.ps1 -resourceGroupName "$(functionResourceGroup)" -functionappName "$(functionAppName)" \
+                -applicationClientID "$(applicationClientID)" -applicationTenantID "$(applicationTenantID)" \
+                -subscriptionID "$(subscriptionID)"
