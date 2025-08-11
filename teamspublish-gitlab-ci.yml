@@ -1,0 +1,161 @@
+spec:
+  inputs:
+    environment: 
+      default: dev
+---
+# Validate using manifest schema
+Teams-validateManifest: 
+  image: tlsexpimages.azurecr.io/gitlab-dockerimage:latest-28-01-2025      # This job runs in the build stage, which runs first.
+  stage: Teams-validateManifest-Stage
+  tags:
+    - gitlab-italent
+  script: |
+    set -ex
+
+     echo "Validating Manifest before Publishing"
+     echo "Using CI/CD Catalog TAG version $VERSION"
+     echo "checking out to iTDAgentTeams folder"
+     cd iTDAgentTeams
+
+     teamsapp validate --manifest-file appPackage/manifest.json --env $environment
+     ls -larth appPackage/
+    
+     echo "Validation Completed Successfully"
+  artifacts:
+    paths:
+      - iTDAgentTeams/appPackage/*
+    expire_in: 1 day
+
+# Build Teams app package with latest env value
+Teams-zipAppPackage: 
+  image: tlsexpimages.azurecr.io/gitlab-dockerimage:latest-28-01-2025      # This job runs in the build stage, which runs first.
+  stage: Teams-zipAppPackage-Stage
+  tags:
+    - gitlab-italent
+  script: |
+    set -ex
+
+    echo "Packaging before Publishing"
+    echo "Using CI/CD Catalog TAG version $VERSION"
+    echo "checking out to iTDAgentTeams folder"
+    cd iTDAgentTeams
+    ls -larth appPackage/
+
+    # teamsapp package --manifest-file appPackage/manifest.json --env $environment --output-folder  appPackage/build --output-package-file appPackage/build/appPackage-${CI_COMMIT_SHA}-${CI_PIPELINE_ID}.${environment}.zip
+    teamsapp package --manifest-file appPackage/manifest.json --env $environment --output-package-file appPackage/build/appPackage-${CI_COMMIT_SHA}-${CI_PIPELINE_ID}.${environment}.zip
+
+    ls -larth appPackage/build
+    cat appPackage/build/manifest.${environment}.json
+    echo "Packaging Completed Successfully"
+  artifacts:
+    paths:
+      - iTDAgentTeams/appPackage/*
+    expire_in: 1 day
+
+# Validate app package using validation rules
+Teams-validateAppPackage: 
+  image: tlsexpimages.azurecr.io/gitlab-dockerimage:latest-28-01-2025      # This job runs in the build stage, which runs first.
+  stage: Teams-validateAppPackage-Stage
+  tags:
+    - gitlab-italent
+  before_script: |
+    npm install -g @pnp/cli-microsoft365@10.5.0 @microsoft/teamsapp-cli@3.0.2
+  script: |
+    set -ex
+
+    echo "Validating AppPackage located at appPackage/build/appPackage-${CI_COMMIT_SHA}-${CI_PIPELINE_ID}.${environment}.zip before Publishing"
+    echo "Using CI/CD Catalog TAG version $VERSION"
+    echo "checking out to iTDAgentTeams folder"
+    cd iTDAgentTeams
+    ls -larth appPackage/build
+
+    # m365 login --authType identity --tenant e55fe08d40-d9961c612aaa --userName 3343d0b-aee63794aae7 --ensure
+    export CI_ENABLED=true
+    export M365_ACCOUNT_NAME=cron@mail.com
+    export M365_ACCOUNT_PASSWORD=PG73
+    export M365_TENANT_ID=e55fe08a-e4e3-c612aaa
+    
+    # teamsapp auth login m365 --tenant
+    # teamsapp auth login m365
+    teamsapp auth login azure --interactive false --service-principal -u 6a6bf413e3  -p Rr --tenant e55961c612aaa
+    # az login --identity --username 3343d0b1-08f4-43ee-bd12-aee63794aae7
+    teamsapp auth list
+    # teamsapp validate --env $environment --interactive false --validate-method validation-rules --package-file appPackage/build/appPackage-${CI_COMMIT_SHA}-${CI_PIPELINE_ID}.${environment}.zip
+    teamsapp validate --env $environment --interactive false --package-file appPackage/build/appPackage-${CI_COMMIT_SHA}-${CI_PIPELINE_ID}.${environment}.zip
+
+    ls -larth appPackage/build
+    cat appPackage/build/manifest.${environment}.json
+    echo "Validation Completed Successfully"
+  artifacts:
+    paths:
+      - iTDAgentTeams/appPackage/*
+    expire_in: 1 day
+
+
+# Apply the Teams app manifest to an existing Teams app in
+# Teams Developer Portal.
+# Will use the app id in manifest file to determine which Teams app to update.
+Teams-update: 
+  image: tlsexpimages.azurecr.io/gitlab-dockerimage:latest-28-01-2025      # This job runs in the build stage, which runs first.
+  stage: Teams-update-Stage
+  tags:
+    - gitlab-italent
+  script: |
+    set -ex
+
+    echo "Updating AppPackage located at appPackage/build/appPackage-${CI_COMMIT_SHA}-${CI_PIPELINE_ID}.${environment}.zip before Publishing"
+    echo "Using CI/CD Catalog TAG version $VERSION"
+    echo "checking out to iTDAgentTeams folder"
+    cd iTDAgentTeams
+    ls -larth
+
+    export CI_ENABLED=true
+    export M365_ACCOUNT_NAME=cron@mail.com
+    export M365_ACCOUNT_PASSWORD=PG73N
+    export M365_TENANT_ID=e55fe08a-e
+
+    teamsapp auth login azure --interactive false --service-principal -u 6a6-b096aee413e3  -p 71zdh15nr --tenant e55f-d9961c612aaa
+    teamsapp auth list
+    teamsapp update --env $environment --package-file appPackage/build/appPackage-${CI_COMMIT_SHA}-${CI_PIPELINE_ID}.${environment}.zip --debug
+
+    ls -larth
+    cat appPackage/build/manifest.${environment}.json
+    echo "Update Completed Successfully"
+  artifacts:
+    paths:
+      - iTDAgentTeams/appPackage/*
+    expire_in: 1 day
+
+# Publish the app to
+# Teams Admin Center (https://admin.teams.microsoft.com/policies/manage-apps)
+# for review and approval
+Teams-Publish: 
+  image: tlsexpimages.azurecr.io/gitlab-dockerimage:latest-28-01-2025      # This job runs in the build stage, which runs first.
+  stage: Teams-Publish-Stage
+  tags:
+    - gitlab-italent
+  script: |
+    set -ex
+
+    echo "Publishing AppPackage located at appPackage/build/appPackage-${CI_COMMIT_SHA}-${CI_PIPELINE_ID}.${environment}.zip before Publishing"
+    echo "Using CI/CD Catalog TAG version $VERSION"
+    echo "checking out to iTDAgentTeams folder"
+    cd iTDAgentTeams
+    ls -larth
+
+    export CI_ENABLED=true
+    export M365_ACCOUNT_NAME=cron@mail.com
+    export M365_ACCOUNT_PASSWORD=PG73Nuj
+    export M365_TENANT_ID=e55fe08a
+
+    teamsapp auth login azure --interactive false --service-principal -u 6a6bfb096aee413e3  -p  --tenant e55fed9961c612aaa
+    teamsapp auth list
+    teamsapp publish --env $environment --package-file appPackage/build/appPackage-${CI_COMMIT_SHA}-${CI_PIPELINE_ID}.${environment}.zip --debug
+
+    ls -larth
+    cat appPackage/build/manifest.${environment}.json
+    echo "Update Completed Successfully"
+  artifacts:
+    paths:
+      - iTDAgentTeams/appPackage/*
+    expire_in: 1 day
